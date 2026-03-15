@@ -8,7 +8,7 @@ module d1dct_pipeline #(
 )(
     input                           clk                 ,
     input                           rst_n               ,
-    input  [WINDOW_WIDTH-1:0]       wind_in             ,
+    input  [WINDOW_WIDTH/8-1:0]     wind_in             ,
     input                           wind_valid          , 
 
     output [8*(DIN_WIDTH+5)-1:0]    d1dct_out           ,
@@ -28,14 +28,16 @@ assign d1dct_valid = rd1dct_valid[4];
 
 // unpack
 
-wire [WINDOW_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-8)*DIN_WIDTH]                              wind_line1;
-wire [(WINDOW_WIDTH/DIN_WIDTH-8)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-16)*DIN_WIDTH]     wind_line2;
-wire [(WINDOW_WIDTH/DIN_WIDTH-16)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-24)*DIN_WIDTH]    wind_line3;
-wire [(WINDOW_WIDTH/DIN_WIDTH-24)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-32)*DIN_WIDTH]    wind_line4;
-wire [(WINDOW_WIDTH/DIN_WIDTH-32)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-40)*DIN_WIDTH]    wind_line5;
-wire [(WINDOW_WIDTH/DIN_WIDTH-40)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-48)*DIN_WIDTH]    wind_line6;
-wire [(WINDOW_WIDTH/DIN_WIDTH-48)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-56)*DIN_WIDTH]    wind_line7;
-wire [(WINDOW_WIDTH/DIN_WIDTH-56)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-64)*DIN_WIDTH]    wind_line8;
+// wire [WINDOW_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-8)*DIN_WIDTH]                              wind_line1;
+// wire [(WINDOW_WIDTH/DIN_WIDTH-8)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-16)*DIN_WIDTH]     wind_line2;
+// wire [(WINDOW_WIDTH/DIN_WIDTH-16)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-24)*DIN_WIDTH]    wind_line3;
+// wire [(WINDOW_WIDTH/DIN_WIDTH-24)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-32)*DIN_WIDTH]    wind_line4;
+// wire [(WINDOW_WIDTH/DIN_WIDTH-32)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-40)*DIN_WIDTH]    wind_line5;
+// wire [(WINDOW_WIDTH/DIN_WIDTH-40)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-48)*DIN_WIDTH]    wind_line6;
+// wire [(WINDOW_WIDTH/DIN_WIDTH-48)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-56)*DIN_WIDTH]    wind_line7;
+// wire [(WINDOW_WIDTH/DIN_WIDTH-56)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-64)*DIN_WIDTH]    wind_line8;
+
+wire [WINDOW_WIDTH/8-1:0] wind_line1 = wind_in;
 
 // 1D DCT input
 wire [DIN_WIDTH-1:0] dct_a0 = wind_line1[8*DIN_WIDTH-1:8*DIN_WIDTH-DIN_WIDTH];

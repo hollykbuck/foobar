@@ -1,373 +1,183 @@
 module d1dct_pipeline #(
-    parameter                       DIN_WIDTH      = 32                 ,
-    parameter                       WINDOW_WIDTH   = 64*32              ,
-    parameter                       M1             = 35'h0000_0000      , // cos(pi/16)*sqrt(2) * 2^16
-    parameter                       M2             = 35'h0000_0000      , // cos(pi/16)*sqrt(2) * 2^16
-    parameter                       M3             = 35'h0000_0000      , // cos(pi/16)*sqrt(2) * 2^16
-    parameter                       M4             = 35'h0000_0000        // cos(pi/16)*sqrt(2) * 2^16
+    parameter DIN_WIDTH = 32
 )(
-    input                           clk                 ,
-    input                           rst_n               ,
-    input  [WINDOW_WIDTH/8-1:0]     wind_in             ,
-    input                           wind_valid          , 
+    input clk,
+    input rst_n,
+    input [8*DIN_WIDTH-1:0] wind_in,
+    input wind_valid,
 
-    output [8*(DIN_WIDTH+5)-1:0]    d1dct_out           ,
-    output                          d1dct_valid         
+    output [8*(DIN_WIDTH+10)-1:0] d1dct_out,
+    output d1dct_valid
 );
 
-reg [4:0] rd1dct_valid;
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        rd1dct_valid <= 0;
-    end else begin
-        rd1dct_valid <= {rd1dct_valid[3:0], wind_valid};
+    localparam DOUT_WIDTH = DIN_WIDTH + 10;
+    localparam SUM_WIDTH = DIN_WIDTH + 20;
+
+    // Orthonormal 1D DCT matrix coefficients scaled by 1024.
+    localparam signed [9:0] C00 = 10'sd362;
+    localparam signed [9:0] C01 = 10'sd362;
+    localparam signed [9:0] C02 = 10'sd362;
+    localparam signed [9:0] C03 = 10'sd362;
+    localparam signed [9:0] C04 = 10'sd362;
+    localparam signed [9:0] C05 = 10'sd362;
+    localparam signed [9:0] C06 = 10'sd362;
+    localparam signed [9:0] C07 = 10'sd362;
+
+    localparam signed [9:0] C10 = 10'sd502;
+    localparam signed [9:0] C11 = 10'sd426;
+    localparam signed [9:0] C12 = 10'sd284;
+    localparam signed [9:0] C13 = 10'sd100;
+    localparam signed [9:0] C14 = -10'sd100;
+    localparam signed [9:0] C15 = -10'sd284;
+    localparam signed [9:0] C16 = -10'sd426;
+    localparam signed [9:0] C17 = -10'sd502;
+
+    localparam signed [9:0] C20 = 10'sd473;
+    localparam signed [9:0] C21 = 10'sd196;
+    localparam signed [9:0] C22 = -10'sd196;
+    localparam signed [9:0] C23 = -10'sd473;
+    localparam signed [9:0] C24 = -10'sd473;
+    localparam signed [9:0] C25 = -10'sd196;
+    localparam signed [9:0] C26 = 10'sd196;
+    localparam signed [9:0] C27 = 10'sd473;
+
+    localparam signed [9:0] C30 = 10'sd426;
+    localparam signed [9:0] C31 = -10'sd100;
+    localparam signed [9:0] C32 = -10'sd502;
+    localparam signed [9:0] C33 = -10'sd284;
+    localparam signed [9:0] C34 = 10'sd284;
+    localparam signed [9:0] C35 = 10'sd502;
+    localparam signed [9:0] C36 = 10'sd100;
+    localparam signed [9:0] C37 = -10'sd426;
+
+    localparam signed [9:0] C40 = 10'sd362;
+    localparam signed [9:0] C41 = -10'sd362;
+    localparam signed [9:0] C42 = -10'sd362;
+    localparam signed [9:0] C43 = 10'sd362;
+    localparam signed [9:0] C44 = 10'sd362;
+    localparam signed [9:0] C45 = -10'sd362;
+    localparam signed [9:0] C46 = -10'sd362;
+    localparam signed [9:0] C47 = 10'sd362;
+
+    localparam signed [9:0] C50 = 10'sd284;
+    localparam signed [9:0] C51 = -10'sd502;
+    localparam signed [9:0] C52 = 10'sd100;
+    localparam signed [9:0] C53 = 10'sd426;
+    localparam signed [9:0] C54 = -10'sd426;
+    localparam signed [9:0] C55 = -10'sd100;
+    localparam signed [9:0] C56 = 10'sd502;
+    localparam signed [9:0] C57 = -10'sd284;
+
+    localparam signed [9:0] C60 = 10'sd196;
+    localparam signed [9:0] C61 = -10'sd473;
+    localparam signed [9:0] C62 = 10'sd473;
+    localparam signed [9:0] C63 = -10'sd196;
+    localparam signed [9:0] C64 = -10'sd196;
+    localparam signed [9:0] C65 = 10'sd473;
+    localparam signed [9:0] C66 = -10'sd473;
+    localparam signed [9:0] C67 = 10'sd196;
+
+    localparam signed [9:0] C70 = 10'sd100;
+    localparam signed [9:0] C71 = -10'sd284;
+    localparam signed [9:0] C72 = 10'sd426;
+    localparam signed [9:0] C73 = -10'sd502;
+    localparam signed [9:0] C74 = 10'sd502;
+    localparam signed [9:0] C75 = -10'sd426;
+    localparam signed [9:0] C76 = 10'sd284;
+    localparam signed [9:0] C77 = -10'sd100;
+
+    reg signed [DIN_WIDTH-1:0] x0, x1, x2, x3, x4, x5, x6, x7;
+    reg s1_valid;
+
+    reg signed [DOUT_WIDTH-1:0] out0, out1, out2, out3, out4, out5, out6, out7;
+    reg out_valid;
+
+    function automatic signed [DOUT_WIDTH-1:0] round_shift_10;
+        input signed [SUM_WIDTH-1:0] value;
+        reg signed [SUM_WIDTH-1:0] biased;
+        begin
+            if (value >= 0)
+                biased = value + 11'sd512;
+            else
+                biased = value - 11'sd512;
+            round_shift_10 = biased >>> 10;
+        end
+    endfunction
+
+    wire signed [SUM_WIDTH-1:0] sum0 =
+        x0 * C00 + x1 * C01 + x2 * C02 + x3 * C03 +
+        x4 * C04 + x5 * C05 + x6 * C06 + x7 * C07;
+    wire signed [SUM_WIDTH-1:0] sum1 =
+        x0 * C10 + x1 * C11 + x2 * C12 + x3 * C13 +
+        x4 * C14 + x5 * C15 + x6 * C16 + x7 * C17;
+    wire signed [SUM_WIDTH-1:0] sum2 =
+        x0 * C20 + x1 * C21 + x2 * C22 + x3 * C23 +
+        x4 * C24 + x5 * C25 + x6 * C26 + x7 * C27;
+    wire signed [SUM_WIDTH-1:0] sum3 =
+        x0 * C30 + x1 * C31 + x2 * C32 + x3 * C33 +
+        x4 * C34 + x5 * C35 + x6 * C36 + x7 * C37;
+    wire signed [SUM_WIDTH-1:0] sum4 =
+        x0 * C40 + x1 * C41 + x2 * C42 + x3 * C43 +
+        x4 * C44 + x5 * C45 + x6 * C46 + x7 * C47;
+    wire signed [SUM_WIDTH-1:0] sum5 =
+        x0 * C50 + x1 * C51 + x2 * C52 + x3 * C53 +
+        x4 * C54 + x5 * C55 + x6 * C56 + x7 * C57;
+    wire signed [SUM_WIDTH-1:0] sum6 =
+        x0 * C60 + x1 * C61 + x2 * C62 + x3 * C63 +
+        x4 * C64 + x5 * C65 + x6 * C66 + x7 * C67;
+    wire signed [SUM_WIDTH-1:0] sum7 =
+        x0 * C70 + x1 * C71 + x2 * C72 + x3 * C73 +
+        x4 * C74 + x5 * C75 + x6 * C76 + x7 * C77;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            x0 <= 0;
+            x1 <= 0;
+            x2 <= 0;
+            x3 <= 0;
+            x4 <= 0;
+            x5 <= 0;
+            x6 <= 0;
+            x7 <= 0;
+            s1_valid <= 0;
+        end else begin
+            x0 <= $signed(wind_in[8*DIN_WIDTH-1 : 7*DIN_WIDTH]);
+            x1 <= $signed(wind_in[7*DIN_WIDTH-1 : 6*DIN_WIDTH]);
+            x2 <= $signed(wind_in[6*DIN_WIDTH-1 : 5*DIN_WIDTH]);
+            x3 <= $signed(wind_in[5*DIN_WIDTH-1 : 4*DIN_WIDTH]);
+            x4 <= $signed(wind_in[4*DIN_WIDTH-1 : 3*DIN_WIDTH]);
+            x5 <= $signed(wind_in[3*DIN_WIDTH-1 : 2*DIN_WIDTH]);
+            x6 <= $signed(wind_in[2*DIN_WIDTH-1 : 1*DIN_WIDTH]);
+            x7 <= $signed(wind_in[1*DIN_WIDTH-1 : 0*DIN_WIDTH]);
+            s1_valid <= wind_valid;
+        end
     end
-end
 
-assign d1dct_valid = rd1dct_valid[4];
-
-// unpack
-
-// wire [WINDOW_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-8)*DIN_WIDTH]                              wind_line1;
-// wire [(WINDOW_WIDTH/DIN_WIDTH-8)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-16)*DIN_WIDTH]     wind_line2;
-// wire [(WINDOW_WIDTH/DIN_WIDTH-16)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-24)*DIN_WIDTH]    wind_line3;
-// wire [(WINDOW_WIDTH/DIN_WIDTH-24)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-32)*DIN_WIDTH]    wind_line4;
-// wire [(WINDOW_WIDTH/DIN_WIDTH-32)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-40)*DIN_WIDTH]    wind_line5;
-// wire [(WINDOW_WIDTH/DIN_WIDTH-40)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-48)*DIN_WIDTH]    wind_line6;
-// wire [(WINDOW_WIDTH/DIN_WIDTH-48)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-56)*DIN_WIDTH]    wind_line7;
-// wire [(WINDOW_WIDTH/DIN_WIDTH-56)*DIN_WIDTH-1:(WINDOW_WIDTH/DIN_WIDTH-64)*DIN_WIDTH]    wind_line8;
-
-wire [WINDOW_WIDTH/8-1:0] wind_line1 = wind_in;
-
-// 1D DCT input
-wire [DIN_WIDTH-1:0] dct_a0 = wind_line1[8*DIN_WIDTH-1:8*DIN_WIDTH-DIN_WIDTH];
-wire [DIN_WIDTH-1:0] dct_a1 = wind_line1[7*DIN_WIDTH-1:7*DIN_WIDTH-DIN_WIDTH];
-wire [DIN_WIDTH-1:0] dct_a2 = wind_line1[6*DIN_WIDTH-1:6*DIN_WIDTH-DIN_WIDTH];
-wire [DIN_WIDTH-1:0] dct_a3 = wind_line1[5*DIN_WIDTH-1:5*DIN_WIDTH-DIN_WIDTH];
-wire [DIN_WIDTH-1:0] dct_a4 = wind_line1[4*DIN_WIDTH-1:4*DIN_WIDTH-DIN_WIDTH];
-wire [DIN_WIDTH-1:0] dct_a5 = wind_line1[3*DIN_WIDTH-1:3*DIN_WIDTH-DIN_WIDTH];
-wire [DIN_WIDTH-1:0] dct_a6 = wind_line1[2*DIN_WIDTH-1:2*DIN_WIDTH-DIN_WIDTH];
-wire [DIN_WIDTH-1:0] dct_a7 = wind_line1[1*DIN_WIDTH-1:1*DIN_WIDTH-DIN_WIDTH];
-
-// piepeline1 : step1
-
-wire [DIN_WIDTH:0] dct_b0;
-wire [DIN_WIDTH:0] dct_b1;
-wire [DIN_WIDTH:0] dct_b2;
-wire [DIN_WIDTH:0] dct_b3;
-wire [DIN_WIDTH:0] dct_b4;
-wire [DIN_WIDTH:0] dct_b5;
-wire [DIN_WIDTH:0] dct_b6;
-wire [DIN_WIDTH:0] dct_b7;
-
-assign dct_b0 = dct_a0 + dct_a7;
-assign dct_b1 = dct_a1 + dct_a6;
-assign dct_b2 = dct_a3 - dct_a4;
-assign dct_b3 = dct_a1 - dct_a6;
-assign dct_b4 = dct_a2 + dct_a5;
-assign dct_b5 = dct_a3 + dct_a4;
-assign dct_b6 = dct_a2 - dct_a5;
-assign dct_b7 = dct_a0 - dct_a7;
-
-reg [DIN_WIDTH:0] rdct_b0;
-reg [DIN_WIDTH:0] rdct_b1;
-reg [DIN_WIDTH:0] rdct_b2;
-reg [DIN_WIDTH:0] rdct_b3;
-reg [DIN_WIDTH:0] rdct_b4;
-reg [DIN_WIDTH:0] rdct_b5;
-reg [DIN_WIDTH:0] rdct_b6;
-reg [DIN_WIDTH:0] rdct_b7;
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        rdct_b0 <= 0;
-        rdct_b1 <= 0;
-        rdct_b2 <= 0;
-        rdct_b3 <= 0;
-        rdct_b4 <= 0;
-        rdct_b5 <= 0;
-        rdct_b6 <= 0;
-        rdct_b7 <= 0;
-    end else begin
-        rdct_b0 <= dct_b0;
-        rdct_b1 <= dct_b1;
-        rdct_b2 <= dct_b2;
-        rdct_b3 <= dct_b3;
-        rdct_b4 <= dct_b4;
-        rdct_b5 <= dct_b5;
-        rdct_b6 <= dct_b6;
-        rdct_b7 <= dct_b7;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            out0 <= 0;
+            out1 <= 0;
+            out2 <= 0;
+            out3 <= 0;
+            out4 <= 0;
+            out5 <= 0;
+            out6 <= 0;
+            out7 <= 0;
+            out_valid <= 0;
+        end else begin
+            out0 <= round_shift_10(sum0);
+            out1 <= round_shift_10(sum1);
+            out2 <= round_shift_10(sum2);
+            out3 <= round_shift_10(sum3);
+            out4 <= round_shift_10(sum4);
+            out5 <= round_shift_10(sum5);
+            out6 <= round_shift_10(sum6);
+            out7 <= round_shift_10(sum7);
+            out_valid <= s1_valid;
+        end
     end
-end
 
-// pipeline2 : step2
-
-wire [DIN_WIDTH+1:0] dct_c0;
-wire [DIN_WIDTH+1:0] dct_c1;
-wire [DIN_WIDTH+1:0] dct_c2;
-wire [DIN_WIDTH+1:0] dct_c3;
-wire [DIN_WIDTH+1:0] dct_c4;
-wire [DIN_WIDTH+1:0] dct_c5;
-wire [DIN_WIDTH+1:0] dct_c6;
-wire [DIN_WIDTH+1:0] dct_c7;
-
-assign dct_c0 = rdct_b0 + rdct_b5;
-assign dct_c1 = rdct_b1 - rdct_b4;
-assign dct_c2 = rdct_b2 + rdct_b6;
-assign dct_c3 = rdct_b1 + rdct_b4;
-assign dct_c4 = rdct_b0 - rdct_b5;
-assign dct_c5 = rdct_b3 + rdct_b7;
-assign dct_c6 = rdct_b3 + rdct_b6;
-assign dct_c7 = {1'b0, rdct_b7};
-
-reg [DIN_WIDTH+1:0] rdct_c0;
-reg [DIN_WIDTH+1:0] rdct_c1;
-reg [DIN_WIDTH+1:0] rdct_c2;
-reg [DIN_WIDTH+1:0] rdct_c3;
-reg [DIN_WIDTH+1:0] rdct_c4;
-reg [DIN_WIDTH+1:0] rdct_c5;
-reg [DIN_WIDTH+1:0] rdct_c6;
-reg [DIN_WIDTH+1:0] rdct_c7;
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        rdct_c0 <= 0;
-        rdct_c1 <= 0;
-        rdct_c2 <= 0;
-        rdct_c3 <= 0;
-        rdct_c4 <= 0;
-        rdct_c5 <= 0;
-        rdct_c6 <= 0;
-        rdct_c7 <= 0;
-    end else begin
-        rdct_c0 <= dct_c0;
-        rdct_c1 <= dct_c1;
-        rdct_c2 <= dct_c2;
-        rdct_c3 <= dct_c3;
-        rdct_c4 <= dct_c4;
-        rdct_c5 <= dct_c5;
-        rdct_c6 <= dct_c6;
-        rdct_c7 <= dct_c7;
-    end
-end
-
-// pipeline3 : step3
-
-wire [DIN_WIDTH+2:0] dct_d0;
-wire [DIN_WIDTH+2:0] dct_d1;
-wire [DIN_WIDTH+2:0] dct_d2;
-wire [DIN_WIDTH+2:0] dct_d3;
-wire [DIN_WIDTH+2:0] dct_d4;
-wire [DIN_WIDTH+2:0] dct_d5;
-wire [DIN_WIDTH+2:0] dct_d6;
-wire [DIN_WIDTH+2:0] dct_d7;
-wire [DIN_WIDTH+2:0] dct_d8;
-
-assign dct_d0 = rdct_c0 + rdct_c3;
-assign dct_d1 = rdct_c0 - rdct_c3;
-assign dct_d2 = {1'b0, rdct_c2};
-assign dct_d3 = rdct_c1 + rdct_c4;
-assign dct_d4 = rdct_c2 - rdct_c5;
-assign dct_d5 = {1'b0, rdct_c4};
-assign dct_d6 = {1'b0, rdct_c5};
-assign dct_d7 = {1'b0, rdct_c6};
-assign dct_d8 = {1'b0, rdct_c7};
-
-reg [DIN_WIDTH+2:0] rdct_d0;
-reg [DIN_WIDTH+2:0] rdct_d1;
-reg [DIN_WIDTH+2:0] rdct_d2;
-reg [DIN_WIDTH+2:0] rdct_d3;
-reg [DIN_WIDTH+2:0] rdct_d4;
-reg [DIN_WIDTH+2:0] rdct_d5;
-reg [DIN_WIDTH+2:0] rdct_d6;
-reg [DIN_WIDTH+2:0] rdct_d7;
-reg [DIN_WIDTH+2:0] rdct_d8;
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        rdct_d0 <= 0;
-        rdct_d1 <= 0;
-        rdct_d2 <= 0;
-        rdct_d3 <= 0;
-        rdct_d4 <= 0;
-        rdct_d5 <= 0;
-        rdct_d6 <= 0;
-        rdct_d7 <= 0;
-        rdct_d8 <= 0;
-    end else begin
-        rdct_d0 <= dct_d0;
-        rdct_d1 <= dct_d1;
-        rdct_d2 <= dct_d2;
-        rdct_d3 <= dct_d3;
-        rdct_d4 <= dct_d4;
-        rdct_d5 <= dct_d5;
-        rdct_d6 <= dct_d6;
-        rdct_d7 <= dct_d7;
-        rdct_d8 <= dct_d8;
-    end
-end
-
-
-// pipeline4 : step4
-// multiply and truncate
-wire [DIN_WIDTH+2:0] dct_e0;
-wire [DIN_WIDTH+2:0] dct_e1;
-wire [DIN_WIDTH+2:0] dct_e2;
-wire [DIN_WIDTH+2:0] dct_e3;
-wire [DIN_WIDTH+2:0] dct_e4;
-wire [DIN_WIDTH+2:0] dct_e5;
-wire [DIN_WIDTH+2:0] dct_e6;
-wire [DIN_WIDTH+2:0] dct_e7;
-wire [DIN_WIDTH+2:0] dct_e8;
-
-assign  dct_e0 = {1'b0, dct_d0};
-assign  dct_e1 = {1'b0, dct_d1};
-assign  dct_e2 = M3 * dct_d2;
-assign  dct_e3 = M1 * dct_d7;
-assign  dct_e4 = M4 * dct_d6;
-assign  dct_e5 = {1'b0, dct_d5};
-assign  dct_e6 = M1 * dct_d3;
-assign  dct_e7 = M2 * dct_d4;
-assign  dct_e8 = {1'b0, dct_d8};
-
-reg [DIN_WIDTH+2:0] rdct_e0;
-reg [DIN_WIDTH+2:0] rdct_e1;
-reg [DIN_WIDTH+2:0] rdct_e2;
-reg [DIN_WIDTH+2:0] rdct_e3;
-reg [DIN_WIDTH+2:0] rdct_e4;
-reg [DIN_WIDTH+2:0] rdct_e5;
-reg [DIN_WIDTH+2:0] rdct_e6;
-reg [DIN_WIDTH+2:0] rdct_e7;
-reg [DIN_WIDTH+2:0] rdct_e8;
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        rdct_e0 <= 0;
-        rdct_e1 <= 0;
-        rdct_e2 <= 0;
-        rdct_e3 <= 0;
-        rdct_e4 <= 0;
-        rdct_e5 <= 0;
-        rdct_e6 <= 0;
-        rdct_e7 <= 0;
-        rdct_e8 <= 0;
-    end else begin
-        rdct_e0 <= dct_e0;
-        rdct_e1 <= dct_e1;
-        rdct_e2 <= dct_e2;
-        rdct_e3 <= dct_e3;
-        rdct_e4 <= dct_e4;
-        rdct_e5 <= dct_e5;
-        rdct_e6 <= dct_e6;
-        rdct_e7 <= dct_e7;
-        rdct_e8 <= dct_e8;
-    end
-end
-
-
-// pipeline5 : step5
-wire [DIN_WIDTH+3:0] dct_f0;
-wire [DIN_WIDTH+3:0] dct_f1;
-wire [DIN_WIDTH+3:0] dct_f2;
-wire [DIN_WIDTH+3:0] dct_f3;
-wire [DIN_WIDTH+3:0] dct_f4;
-wire [DIN_WIDTH+3:0] dct_f5;
-wire [DIN_WIDTH+3:0] dct_f6;
-wire [DIN_WIDTH+3:0] dct_f7;
-
-assign  dct_f0 = {1'b0, dct_e0};
-assign  dct_f1 = {1'b0, dct_e1};
-assign  dct_f2 = dct_e5 + dct_e6;
-assign  dct_f3 = dct_e5 - dct_e6;
-assign  dct_f4 = dct_e3 + dct_e8;
-assign  dct_f5 = dct_e8 - dct_e3;
-assign  dct_f6 = dct_e2 + dct_e7;
-assign  dct_f7 = dct_e4 + dct_e7;
-
-reg [DIN_WIDTH+3:0] rdct_f0;
-reg [DIN_WIDTH+3:0] rdct_f1;
-reg [DIN_WIDTH+3:0] rdct_f2;
-reg [DIN_WIDTH+3:0] rdct_f3;
-reg [DIN_WIDTH+3:0] rdct_f4;
-reg [DIN_WIDTH+3:0] rdct_f5;
-reg [DIN_WIDTH+3:0] rdct_f6;
-reg [DIN_WIDTH+3:0] rdct_f7;
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        rdct_f0 <= 0;
-        rdct_f1 <= 0;
-        rdct_f2 <= 0;
-        rdct_f3 <= 0;
-        rdct_f4 <= 0;
-        rdct_f5 <= 0;
-        rdct_f6 <= 0;
-        rdct_f7 <= 0;
-    end else begin
-        rdct_f0 <= dct_f0;
-        rdct_f1 <= dct_f1;
-        rdct_f2 <= dct_f2;
-        rdct_f3 <= dct_f3;
-        rdct_f4 <= dct_f4;
-        rdct_f5 <= dct_f5;
-        rdct_f6 <= dct_f6;
-        rdct_f7 <= dct_f7;
-    end
-end
-
-// pipeline6 : step6
-wire [DIN_WIDTH+4:0] dct_s0;
-wire [DIN_WIDTH+4:0] dct_s1;
-wire [DIN_WIDTH+4:0] dct_s2;
-wire [DIN_WIDTH+4:0] dct_s3;
-wire [DIN_WIDTH+4:0] dct_s4;
-wire [DIN_WIDTH+4:0] dct_s5;
-wire [DIN_WIDTH+4:0] dct_s6;
-wire [DIN_WIDTH+4:0] dct_s7;
-
-assign  dct_s0 = {1'b0, dct_f0};
-assign  dct_s1 = dct_f4 + dct_f7;
-assign  dct_s2 = {1'b0, dct_f2};
-assign  dct_s3 = dct_f5 - dct_f6;
-assign  dct_s4 = {1'b0, dct_f1};
-assign  dct_s5 = dct_f5 + dct_f6;
-assign  dct_s6 = {1'b0, dct_f3};
-assign  dct_s7 = dct_f4 - dct_f7;
-
-reg [DIN_WIDTH+4:0] rdct_s0;
-reg [DIN_WIDTH+4:0] rdct_s1;
-reg [DIN_WIDTH+4:0] rdct_s2;
-reg [DIN_WIDTH+4:0] rdct_s3;
-reg [DIN_WIDTH+4:0] rdct_s4;
-reg [DIN_WIDTH+4:0] rdct_s5;
-reg [DIN_WIDTH+4:0] rdct_s6;
-reg [DIN_WIDTH+4:0] rdct_s7;
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        rdct_s0 <= 0;
-        rdct_s1 <= 0;
-        rdct_s2 <= 0;
-        rdct_s3 <= 0;
-        rdct_s4 <= 0;
-        rdct_s5 <= 0;
-        rdct_s6 <= 0;
-        rdct_s7 <= 0;
-    end else begin
-        rdct_s0 <= dct_s0;
-        rdct_s1 <= dct_s1;
-        rdct_s2 <= dct_s2;
-        rdct_s3 <= dct_s3;
-        rdct_s4 <= dct_s4;
-        rdct_s5 <= dct_s5;
-        rdct_s6 <= dct_s6;
-        rdct_s7 <= dct_s7;
-    end
-end
-
-assign d1dct_out   = {rdct_s0, rdct_s1, rdct_s2, rdct_s3, rdct_s4, rdct_s5, rdct_s6, rdct_s7};
-assign d1dct_valid = 
-
-
+    assign d1dct_out = {out0, out1, out2, out3, out4, out5, out6, out7};
+    assign d1dct_valid = out_valid;
 
 endmodule
